@@ -136,22 +136,31 @@ class GoBoard(tk.Frame):
         for col in range(9):
             x = self.padding + col * self.cell_size
             self.canvas.create_line(x, self.padding, x, self.padding+8*self.cell_size, tags="grid")
+        # 将网格线置于最底层
+        self.canvas.tag_lower("grid")
 
     def _redraw_plants(self):
         self.canvas.delete("plant")
         for r in range(9):
             for c in range(9):
                 cnt = min(2, self.plant_counts[r][c])
-                if cnt == 0: continue
+                if cnt == 0:
+                    continue
                 x = self.padding + c * self.cell_size
                 y = self.padding + r * self.cell_size
-                offsets = [(-7,-5), (7,5)] if cnt == 2 else [(0,0)]
+                offsets = [(-7, -5), (7, 5)] if cnt == 2 else [(0, 0)]
                 for ox, oy in offsets:
-                    draw_flower(self.canvas, x+ox, y+oy)
-        # 确保最后落子标记仍在最上层
-        if self.last_marker:
-            self.canvas.tag_raise("last_marker")
+                    draw_flower(self.canvas, x + ox, y + oy)
 
+        # 按正确顺序排布图层（从底到顶）
+        self.canvas.tag_lower("grid")          # 网格最底层
+        self.canvas.tag_raise("stone")         # 棋子在网格之上
+        self.canvas.tag_raise("capture_marker")# 待结算标记在标记之上（灰色圈）
+        self.canvas.tag_raise("ghost")         # 虚子提示在最上层
+        self.canvas.tag_raise("plant")         # 植物在棋子之上
+        self.canvas.tag_raise("last_marker")   # 落子标记在植物之上
+
+    # ---------- 虚子提示 ----------
     def _on_mouse_move(self, event):
         if self.game_over or self.pending_capture is not None:
             self._clear_ghost()
@@ -191,7 +200,7 @@ class GoBoard(tk.Frame):
         stone_id = self.canvas.create_oval(x-r, y-r, x+r, y+r, fill=color, outline="black", tags="stone")
         self.stone_ids[row][col] = stone_id
         self.board_state[row][col] = color
-        self._redraw_plants()
+        self._redraw_plants()  # 内部会将植物下移，不会覆盖棋子
 
     def _remove_stones(self, positions):
         for r, c in positions:
@@ -212,8 +221,7 @@ class GoBoard(tk.Frame):
         self.last_marker = self.canvas.create_rectangle(
             x - size//2, y - size//2, x + size//2, y + size//2,
             fill=color, outline="", tags="last_marker")
-        # 确保在最上层
-        self.canvas.tag_raise("last_marker")
+        # 创建后自动在最上层，无需额外操作（因为植物已被 lowered）
 
     def _check_and_capture(self, row, col):
         color = self.board_state[row][col]
@@ -398,7 +406,7 @@ class GoBoard(tk.Frame):
         if defend_pieces < 4:
             defend_pieces = 0
             defend_plants_total = 0
-            damage = attack_pieces if not is_counter else attack_pieces  # 统一为 attack_pieces（已减1）
+            damage = attack_pieces
             if attack_color == "black":
                 self.white_hp -= damage
             else:
@@ -483,7 +491,7 @@ class GoBoard(tk.Frame):
             self.canvas.unbind("<Motion>")
             self.info_var.set("")
 
-    # ---------- AI 接口（调用外部模块） ----------
+    # ---------- AI 接口 ----------
     def _ai_make_move(self):
         move = get_ai_move(self, self.ai_difficulty)
         if move:
@@ -492,7 +500,7 @@ class GoBoard(tk.Frame):
             if not self.game_over and self.current_player == self.ai_color:
                 self.after(200, self._ai_make_move)
 
-    # ---------- 以下方法暴露给 AI 模块 ----------
+    # ---------- 暴露给 AI 模块的辅助方法 ----------
     def detect_capture(self, row, col, color, board=None):
         if board is None: board = self.board_state
         dirs = [(0,1),(1,0),(1,1),(1,-1)]
@@ -544,7 +552,6 @@ class GoBoard(tk.Frame):
             self.current_player = "white" if player == "black" else "black"
 
     def _simulate_settlement(self, row, col):
-        # 复制自 _handle_settlement 但仅改变状态，不操作 GUI
         pending = self.pending_capture
         attack_color = pending['color']
         defend_color = self.current_player
